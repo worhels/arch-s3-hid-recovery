@@ -34,6 +34,8 @@ python .\provision.py --gui
 .\build.ps1
 ```
 
+On a clean checkout, the build helper selects the ESP32-S3 target automatically. If an existing `sdkconfig` targets another chip, it stops rather than replacing that configuration; back it up and choose the target explicitly first.
+
 The provisioning dialog writes `private/credentials.h`, `private/client.json`, `private/servercert.pem`, and `private/prvtkey.pem`. Keep this directory private. Use a dedicated trusted Wi-Fi network; do not add router port forwarding or expose the API to the Internet.
 
 To test compilation without real Wi-Fi credentials, run `python .\provision.py --build-only` and then run `.\build.ps1`. Build-only credentials are not suitable for recovery or flashing.

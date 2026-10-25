@@ -92,7 +92,9 @@ static esp_err_t api(httpd_req_t *req) {
     if (!strcmp(req->uri, "/disarm")) {
         armed_until = 0;
         release_pending = true;
-        release_keys();
+        if (!release_keys()) {
+            return fail(req, "503 Service Unavailable", "Disarmed; key release is pending");
+        }
         return httpd_resp_sendstr(req, "Disarmed");
     }
     if (!strcmp(req->uri, "/arm")) {

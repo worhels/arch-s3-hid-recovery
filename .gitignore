@@ -1,5 +1,5 @@
 private/
-firmware/build/
+firmware/build*/
 firmware/managed_components/
 firmware/sdkconfig
 __pycache__/

@@ -10,6 +10,7 @@ import struct
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
+MAX_RESPONSE_BYTES = 4096
 KEYS = {"enter": 40, "esc": 41, "backspace": 42, "tab": 43, "space": 44,
         "home": 74, "pageup": 75, "delete": 76, "end": 77, "pagedown": 78,
         "right": 79, "left": 80, "down": 81, "up": 82}
@@ -76,7 +77,10 @@ class Client:
                 headers={'Authorization': 'Bearer ' + self.config['token'],
                          'Content-Type': 'application/octet-stream'})
             response = self.connection.getresponse()
-            content = response.read().decode('utf-8')
+            raw = response.read(MAX_RESPONSE_BYTES + 1)
+            if len(raw) > MAX_RESPONSE_BYTES:
+                raise RuntimeError('Device response exceeds the size limit')
+            content = raw.decode('utf-8')
             if response.status != 200:
                 raise RuntimeError(f'HTTP {response.status}: {content}')
             return content
@@ -88,7 +92,19 @@ class Client:
             raise  # Never retry ambiguous input automatically.
 
     def status(self) -> dict:
-        result = json.loads(self.request('/status'))
+        try:
+            result = json.loads(self.request('/status'))
+        except json.JSONDecodeError:
+            raise RuntimeError('Device returned invalid status JSON') from None
+        if not isinstance(result, dict):
+            raise RuntimeError('Device returned an invalid status object')
+        if (type(result.get('usb')) is not bool
+                or type(result.get('armed')) is not bool
+                or type(result.get('sequence')) is not int
+                or not 0 <= result['sequence'] <= 0xFFFFFFFF
+                or type(result.get('leds')) is not int
+                or not 0 <= result['leds'] <= 0xFF):
+            raise RuntimeError('Device returned an invalid status object')
         self.sequence = result['sequence']
         return result
 

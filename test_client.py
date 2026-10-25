@@ -4,7 +4,7 @@ import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import MagicMock, patch
-from client import Client, character, chord
+from client import MAX_RESPONSE_BYTES, Client, character, chord
 
 class KeyboardTests(unittest.TestCase):
     def test_printable_ascii(self):
@@ -49,6 +49,33 @@ class KeyboardTests(unittest.TestCase):
         self.assertIsNone(client.sequence)
         self.assertIsNone(client.connection)
         conn.request.assert_called_once()
+
+    def test_oversized_device_response_closes_connection(self):
+        client = object.__new__(Client)
+        client.config = {'token': 'test'}
+        client.sequence = 10
+        connection = MagicMock()
+        client.connection = connection
+        response = connection.getresponse.return_value
+        response.status = 200
+        response.read.return_value = b'x' * (MAX_RESPONSE_BYTES + 1)
+
+        with self.assertRaisesRegex(RuntimeError, 'exceeds the size limit'):
+            client.request('/status')
+
+        response.read.assert_called_once_with(MAX_RESPONSE_BYTES + 1)
+        connection.close.assert_called_once()
+        self.assertIsNone(client.connection)
+
+    def test_status_rejects_invalid_schema_without_advancing_sequence(self):
+        client = object.__new__(Client)
+        client.sequence = None
+        client.request = MagicMock(return_value='{"usb":true,"armed":false,"sequence":-1,"leds":0}')
+
+        with self.assertRaisesRegex(RuntimeError, 'invalid status object'):
+            client.status()
+
+        self.assertIsNone(client.sequence)
 
 if __name__ == '__main__':
     unittest.main()

@@ -1,6 +1,7 @@
 """Visible end-to-end test: HTTPS -> ESP32 -> USB -> Windows text widget."""
 import argparse
 import json
+import queue
 import threading
 import tkinter as tk
 import ctypes
@@ -35,37 +36,71 @@ def test() -> None:
     button.config(state='disabled')
     entry.delete(0, tk.END)
     entry.focus_set()
+    root.update_idletasks()
+    if root.focus_get() != entry:
+        status.set('Could not focus the test field; click it and retry.')
+        button.config(state='normal')
+        return
     status.set('Testing physical USB input...')
+    result_queue: queue.Queue[str | None] = queue.Queue()
+    stop = threading.Event()
+    worker_active = threading.Event()
+
+    def monitor_focus() -> None:
+        if not worker_active.is_set():
+            return
+        if root.focus_get() != entry:
+            stop.set()
+        root.after(25, monitor_focus)
+
     def worker() -> None:
-        client = Client(args.host)
+        client = None
         error = None
+        worker_active.set()
         try:
+            client = Client(args.host)
             current = client.status()
             if current['leds'] & 2:
                 raise RuntimeError('Caps Lock is on; turn it off and retry')
             client.arm()
             for char in expected:
-                if root.focus_get() != entry:
+                if stop.is_set():
                     raise RuntimeError('Focus lost; stopped')
                 client.key(*character(char))
         except Exception as exc:
             error = str(exc)
         finally:
-            try:
-                client.request('/disarm', b'')
-            except Exception:
-                pass
-            if client.connection:
-                client.connection.close()
-        def finish() -> None:
-            received = entry.get()
-            passed = error is None and received == expected
-            result_path.write_text(json.dumps({'passed': passed, 'expected': expected,
-                'received': received, 'error': error}, indent=2), encoding='utf-8')
-            status.set('PASS: exact USB input received' if passed else 'FAIL: ' + (error or 'layout/input mismatch'))
-            button.config(state='normal')
-        root.after(150, finish)
+            if client is not None:
+                try:
+                    client.request('/disarm', b'')
+                except Exception as exc:
+                    if error is None:
+                        error = 'Could not disarm device; unplug USB if a key is stuck: ' + str(exc)
+                if client.connection:
+                    try:
+                        client.connection.close()
+                    except OSError as exc:
+                        if error is None:
+                            error = 'Could not close HTTPS connection: ' + str(exc)
+            worker_active.clear()
+            result_queue.put(error)
+
+    def finish_when_ready() -> None:
+        try:
+            error = result_queue.get_nowait()
+        except queue.Empty:
+            root.after(25, finish_when_ready)
+            return
+        received = entry.get()
+        passed = error is None and received == expected
+        result_path.write_text(json.dumps({'passed': passed, 'expected': expected,
+            'received': received, 'error': error}, indent=2), encoding='utf-8')
+        status.set('PASS: exact USB input received' if passed else 'FAIL: ' + (error or 'layout/input mismatch'))
+        button.config(state='normal')
+
     threading.Thread(target=worker, daemon=True).start()
+    root.after(25, monitor_focus)
+    root.after(25, finish_when_ready)
 
 button = tk.Button(root, text='Start USB test', command=test)
 button.pack(pady=10)
