@@ -1,0 +1,8 @@
+private/
+firmware/build/
+firmware/managed_components/
+firmware/sdkconfig
+__pycache__/
+.venv/
+.vscode/
+hardware-result.json
